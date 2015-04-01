@@ -1,0 +1,9 @@
+omxmotion
+*.o
+*.s
+.*.sw?
+*.so
+*.mkv
+*.png
+*.jpg
+*.bin
