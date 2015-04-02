@@ -128,7 +128,7 @@ int initmotion(struct context *ctx, char *map, int sens, int thresh,
 	mctx.height = rows = (ctx->height + 15) / 16;
 	mctx.width = cols = ((ctx->width + 15) / 16) + 1;
 	mctx.map = malloc((sizeof(uint16_t)) * (cols+1)*rows);
-	mctx.threshold = (rows * cols * thresh) / 100;
+	mctx.threshold = thresh; //(rows * cols * thresh) / 100;
 	mctx.pngfn = ctx->dumppattern;
 
 	if (map) {
@@ -232,10 +232,6 @@ static void lookformotion(struct motvec *v)
 
 	if (mctx.pngfn)
 		dumppng(v);
-
-/* Probably an I-frame: */
-	if (t == 0)
-		return;
 
 printf("\r%5d / %d.", t, mctx.threshold);
 fflush(stdout);
