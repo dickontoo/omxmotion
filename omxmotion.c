@@ -86,7 +86,7 @@ static OMX_VERSIONTYPE SpecificationVersion = {
 				}					\
 			} while (0)
 
-#define WAIT usleep(100000)
+#define WAIT usleep(500000)
 /* ... but damn useful.*/
 
 #define V_ALWAYS	0
@@ -805,10 +805,10 @@ int main(int argc, char *argv[])
 	OERR(OMX_GetParameter(cam, OMX_IndexParamPortDefinition, portdef));
 	viddef = &portdef->format.video;
 	viddef->nFrameWidth = ctx.width;
-	viddef->nFrameHeight = (ctx.height + 15) & ~15;;
+	viddef->nFrameHeight = ctx.height;
 	viddef->nStride = 0;
 	viddef->xFramerate = (ctx.framerate<<16);
-	viddef->nSliceHeight = viddef->nFrameHeight;
+	viddef->nSliceHeight = (ctx.height + 15) & ~15;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamPortDefinition, portdef));
 /* (To set the stride correctly:) */
 	OERR(OMX_GetParameter(cam, OMX_IndexParamPortDefinition, portdef));
