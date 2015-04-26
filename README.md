@@ -31,33 +31,44 @@ Usage
 
 Trivially:
 
-root@camera:/home/dickon/src/omxmotion# ./omxmotion 
+\# ```./omxmotion```
+
 Usage: ./omxmotion [-b bitrate] [-d outputdir] [-r framerate ]
+
         <[-s 0..255] | [-m mapfile.png]> [-t 0..100]
 
 Where:
+
         -b bitrate      Target bitrate
+        
         -d outputdir    Recordings directory
+        
         -h              This help
+        
         -m mapfile.png  Heatmap image
+        
                 OR:
+                
         -s 0..255       Macroblock sensitivity
+        
         -r rate         Encoding framerate
+        
         -t 0..100       Macroblocks over threshold to trigger (%)
+        
         -z pattern      Dump motion vector images (debug)
+        
+```-b```, ```-d```, ```-h``` and ```-r``` should be obvious. 
 
-root@camera:/home/dickon/src/omxmotion# 
+```-t``` is the number of above-trigger-threshold blocks to trigger recording on, as a percentage.
 
--b, -d, -h and -r should be obvious.  -t is the number of
-above-trigger-threshold blocks to trigger recording on, as a percentage.  -z
-is best ignored for now.
+```-z``` is best ignored for now.
 
--s is the threshold above which motion is assumed for this macroblock.  This
+```-s``` is the threshold above which motion is assumed for this macroblock.  This
 isn't as flexible as the mapfile option -- it simply sets the internal
-structure to the flat figure you specify -- and passing both -s and -m isn't
-an error, but -m takes precidence.
+structure to the flat figure you specify -- and passing both ```-s``` and ```-m``` isn't
+an error, but ```-m``` takes precidence.
 
--m mapfile is the fun one.  In most uses of software like this, there are
+```-m``` mapfile is the fun one.  In most uses of software like this, there are
 regions of the frame which you aren't interested in.  Passing a mapfile
 allows you to mark regions of the frame in which you are interested, and
 regions which should be disregarded when detecting motion.
@@ -89,7 +100,7 @@ pixels.  1080 is not, so capture 1088.  Unfortunately, the macroblocks at
 the bottom of the screen get very noisy when scaled back to 1080, so make
 them white.
 
--z is a debugging tool.  If you find it triggering more than you expect,
+```-z``` is a debugging tool.  If you find it triggering more than you expect,
 it's probably worth trying this:
 
  * mkdir vo
