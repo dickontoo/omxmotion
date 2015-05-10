@@ -20,7 +20,9 @@
 #ifndef __OMXMOTION_H
 #define __OMXMOTION_H
 
+#ifndef _BSD_SOURCE
 #define _BSD_SOURCE
+#endif
 #define FF_API_CODEC_ID 1
 
 #include <stdio.h>
@@ -84,7 +86,9 @@ struct frame {
 
 struct context {
 	AVFormatContext *oc;
+	AVFormatContext *coc;
 	int		vidindex;
+	int		cocvidindex;
 	volatile int	flags;
 	OMX_BUFFERHEADERTYPE *encbufs, *bufhead;
 	OMX_HANDLETYPE	clk, cam, enc, nul;
@@ -112,6 +116,7 @@ struct context {
 	unsigned int	lastevent;
 	struct frame	frames[INMEMFRAMES];
 	int		fd;
+	char		*command;
 };
 #define FLAGS_VERBOSE		(1<<0)
 #define FLAGS_RECORDING		(1<<1)

@@ -33,31 +33,44 @@ Trivially:
 
 \# ```./omxmotion```
 
-Usage: ./omxmotion [-b bitrate] [-d outputdir] [-r framerate ]
-
-        <[-s 0..255] | [-m mapfile.png]> [-t 0..100]
+Usage: ./omxmotion [-b bitrate] [-d outputdir] [-r framerate ] [ etc ]
 
 Where:
+        -b bitrate      Target bitrate (Mb/s)
 
-        -b bitrate      Target bitrate
-        
+        -c url  Continuous streaming URL
+
         -d outputdir    Recordings directory
-        
+
+        -e command      Execute $command on state change
+
         -h              This help
-        
+
         -m mapfile.png  Heatmap image
-        
+
                 OR:
-                
+
         -s 0..255       Macroblock sensitivity
-        
+
+        -o outro        Frames to record after motion has ceased
+
         -r rate         Encoding framerate
-        
-        -t 0..100       Macroblocks over threshold to trigger (%)
-        
+
+        -t 0..100       Macroblocks over threshold to trigger (raw)
+
+        -v              Verbose
+
         -z pattern      Dump motion vector images (debug)
+
         
-```-b```, ```-d```, ```-h``` and ```-r``` should be obvious. 
+```-b```, ```-d```, ```-h``` and ```-r``` should be obvious.
+
+```-c``` is a URL to stream the H.264 to, continuously.  Try
+udp://@224.0.0.40:5554 or similar; view in mplayer or vlc with the same URL.
+
+```-e``` executes the nominated command when recording starts or stops.  It's
+passed either 'start' or 'stop' in $1, with the filename of the newly-opened
+output file in $2 on start.
 
 ```-t``` is the number of above-trigger-threshold blocks to trigger recording on, as a percentage.
 
@@ -136,6 +149,35 @@ copied to the output file.  The encoder has been configured to avoid
 B-frames, and only use one reference frame, which means this should be
 sensible.
 
+
+Bugs
+----
+
+The continuous streaming mode is a bit experimental at present, and has
+some issues with large frames: packets are apparently dropped.  If anyone
+has any idea what to do about that, please let me know.  I may write a
+custom muxer.  Similarly, ffmpeg's rtp support is novel and interesting and
+doesn't do much that's actually useful.  Stick to UDP for the time being.
+The stream itself seems to be slightly corrupt, most likely due to SPS and
+PPS packets not being handled correctly (they're inline at present to make
+it work at all, and I suspect they're not being handled correctly by the TS
+muxer).  mplayer will repeatedly whinge:
+
+	V:   0.0   0/  0 ??% ??% ??,?% 0 0 
+	[h264 @ 0x7f19c3daf900]no frame!
+	V:   0.0   0/  0 ??% ??% ??,?% 0 0 
+	[h264 @ 0x7f19c3daf900]no frame!
+	V:   0.0   0/  0 ??% ??% ??,?% 0 0 
+	Error while decoding frame!
+	Error while decoding frame!
+
+etc.
+
+A word of warning: high(ish)-bitrate multicast streams can do Bad Things
+(tm) to cheap wifi kit.  If you find your wifi network dropping out,
+firewall the packets from it.
+
+There are still no timings present in the streams.  This needs to change.
 
 
 Licence guff:

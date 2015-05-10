@@ -127,7 +127,7 @@ int initmotion(struct context *ctx, char *map, int sens, int thresh,
 
 	mctx.height = rows = (ctx->height + 15) / 16;
 	mctx.width = cols = ((ctx->width + 15) / 16) + 1;
-	mctx.map = malloc((sizeof(uint16_t)) * (cols+1)*rows);
+	mctx.map = (uint16_t *) malloc((sizeof(uint16_t)) * (cols+1)*rows);
 	mctx.threshold = thresh; //(rows * cols * thresh) / 100;
 	mctx.pngfn = ctx->dumppattern;
 
@@ -195,6 +195,7 @@ void dumppng(struct motvec *v)
 	png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	info = png_create_info_struct(png);
 	sprintf(fn, mctx.pngfn, fnum);
+printf("Writing vector frame %s\n", fn);
 	fd = fopen(fn, "wb");
 	png_init_io(png, fd);
 	png_set_compression_level(png, 0);

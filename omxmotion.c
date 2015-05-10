@@ -31,9 +31,21 @@
  */
 
 
+/* To shut color_coded / clang up: */
+#ifndef OMX_SKIP64BIT
+#define OMX_SKIP64BIT
+#endif
+
+#include <time.h>
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 1
+#endif
 #include "omxmotion.h"
 #include "motion.h"
+#include <unistd.h>
+#include <signal.h>
 
+extern char *optarg;
 
 static OMX_VERSIONTYPE SpecificationVersion = {
 	.s.nVersionMajor = 1,
@@ -224,7 +236,7 @@ static const char *mapcomponent(struct context *ctx, OMX_HANDLETYPE h)
 
 
 
-static void writeframe(struct frame *f)
+static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 {
 	AVPacket pkt;
 	int r;
@@ -244,58 +256,56 @@ static void writeframe(struct frame *f)
 		pkt.flags |= AV_PKT_FLAG_KEY;
 
 	pkt.pts = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) |
-		f->tick.nLowPart), omxtimebase, ctx.oc->streams[0]->time_base);
+		f->tick.nLowPart), omxtimebase, oc->streams[0]->time_base);
 
-	pkt.dts = AV_NOPTS_VALUE; // dts;
-	pkt.stream_index = ctx.vidindex;
+	pkt.dts = pkt.pts; // AV_NOPTS_VALUE; // dts;
+	pkt.stream_index = index;
 	pkt.data = f->buf;
 	pkt.size = f->len;
 
-	r = av_write_frame(ctx.oc, &pkt);
+	r = av_write_frame(oc, &pkt);
 	if (r != 0) {
 		char err[256];
 		av_strerror(r, err, sizeof(err));
 		printf("Failed to write a video frame: %s\n", err);
 	}
+	av_write_frame(oc, NULL);
 }
 
 
 
-static int openoutput(void)
+static AVFormatContext *openoutput(char *url, int *index)
 {
 	int			r;
 	AVFormatContext		*oc;
 	char			err[256];
-	struct tm		tm;
-	time_t			t;
 	AVOutputFormat		*fmt;
 	int			i;
 	AVStream		*oflow;
 	AVCodec			*c;
 	AVCodecContext		*cc;
-	unsigned int		ftw;
 	AVRational		omxtimebase = { 1, 1000000 };
 	AVRational		framerate;
 	struct frame		*f;
 
-	t = time(NULL);
-	localtime_r(&t, &tm);
-	snprintf(err, sizeof(err), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
-		ctx.outdir, tm.tm_year+1900, tm.tm_mon, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec);
 //	ctx.fd = open(err, O_CREAT|O_LARGEFILE|O_RDWR, 0666);
 	if (ctx.fd != -1) {
 		write(ctx.fd, ctx.sps, ctx.spslen);
 		write(ctx.fd, ctx.pps, ctx.ppslen);
 	}
 
-	fmt = av_guess_format("matroska", err, "video/x-matroska");
+//	fmt = av_guess_format("matroska", err, "video/x-matroska");
+//	fmt = av_guess_format("mp4", err, "video/mp4");
+//	fmt = av_guess_format("mpegts", url, "video/MP2TS");
+	if (strstr(url, "://")) {
+		avformat_network_init();
+		fmt = av_guess_format("mpegts", url, "video/MP2TS");
+	} else {
+		fmt = av_guess_format(NULL, url, NULL);
+	}
 
 	if (!fmt) {
-		fmt = av_guess_format(NULL, "MPEG", NULL);
-	}
-	if (!fmt) {
-		fprintf(stderr, "Failed even that.  Bye bye.\n");
+		fprintf(stderr, "Failed.  Bye bye.\n");
 		exit(1);
 	}
 
@@ -305,14 +315,13 @@ static int openoutput(void)
 		exit(1);
 	}
 	oc->oformat = fmt;
-	strcpy(oc->filename, err);
+	strcpy(oc->filename, url);
 	oc->debug = 1;
 	oc->duration = 0;
 	oc->start_time = 0;
 	oc->start_time_realtime = time(NULL) * 1000000;
 	oc->bit_rate = ctx.bitrate;
 
-#define ETB(x) x.num, x.den
 	c = avcodec_find_encoder(CODEC_ID_H264);
 	oflow = avformat_new_stream(oc, c);
 	cc = oflow->codec;
@@ -324,16 +333,18 @@ static int openoutput(void)
 	cc->profile = FF_PROFILE_H264_HIGH;
 	cc->level = 41;
 	cc->time_base = omxtimebase;
-	ctx.vidindex = oflow->index;
+	oflow->time_base = omxtimebase;
+	*index = oflow->index;
 
-	if (cc->extradata) {
-		av_free(cc->extradata);
+	if (ctx.spslen + ctx.ppslen > 0) {
+		if (cc->extradata) {
+			av_free(cc->extradata);
+		}
+		cc->extradata_size = ctx.spslen + ctx.ppslen;
+		cc->extradata = av_malloc(ctx.spslen + ctx.ppslen);
+		memcpy(cc->extradata, ctx.sps, ctx.spslen);
+		memcpy(&cc->extradata[ctx.spslen], ctx.pps, ctx.ppslen);
 	}
-	cc->extradata_size = ctx.spslen + ctx.ppslen;
-	cc->extradata = av_malloc(ctx.spslen + ctx.ppslen);
-	memcpy(cc->extradata, ctx.sps, ctx.spslen);
-	memcpy(&cc->extradata[ctx.spslen], ctx.pps, ctx.ppslen);
-
 
 	framerate.num = ctx.framerate;
 	framerate.den = 1;
@@ -341,7 +352,7 @@ static int openoutput(void)
 	oflow->r_frame_rate = framerate;
 	f = &ctx.frames[ctx.previframe & (INMEMFRAMES-1)];
 	oflow->start_time = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) | 
-		f->tick.nLowPart), omxtimebase, ctx.oc->streams[0]->time_base);
+		f->tick.nLowPart), omxtimebase, oflow->time_base);
 	for (i = 0; i < oc->nb_streams; i++) {
 		if (oc->oformat->flags & AVFMT_GLOBALHEADER)
 			oc->streams[i]->codec->flags
@@ -354,27 +365,19 @@ static int openoutput(void)
 #ifndef URL_WRONLY
 #define URL_WRONLY AVIO_FLAG_WRITE
 #endif
-	avio_open(&oc->pb, err, URL_WRONLY);
+	avio_open(&oc->pb, url, URL_WRONLY);
 
 	printf("\n");
 	r = avformat_write_header(oc, NULL);
 	if (r < 0) {
 		av_strerror(r, err, sizeof(err));
 		fprintf(stderr, "Failed to write header: %s\n", err);
-		return -1;
+		return NULL;
 	}
-	av_dump_format(oc, 0, err, 1);
+	av_dump_format(oc, 0, url, 1);
 
-	ftw = ctx.framenum - ctx.previframe;
-	printf("Writing initial %d frames out...\n", ftw);
 
-	for (i = 0; i < ftw; i++) {
-		writeframe(&ctx.frames[(ctx.previframe + i) & (INMEMFRAMES-1)]);
-	}
-
-	printf("done.\n");
-
-	return 0;
+	return oc;
 }
 
 
@@ -564,21 +567,22 @@ static OMX_BUFFERHEADERTYPE *allocbufs(OMX_HANDLETYPE h, int port, int enable)
 
 
 
-
 static void usage(const char *name)
 {
 	fprintf(stderr, "Usage: %s [-b bitrate] [-d outputdir] [-r framerate ]\n"
 		"\t<[-s 0..255] | [-m mapfile.png]> [-t 0..100]\n\n"
 		"Where:\n"
-	"\t-b bitrate\tTarget bitrate\n"
+	"\t-b bitrate\tTarget bitrate (Mb/s)\n"
+	"\t-c url\tContinuous streaming URL\n"
 	"\t-d outputdir\tRecordings directory\n"
+	"\t-e command\tExecute $command on state change\n"
 	"\t-h\t\tThis help\n"
 	"\t-m mapfile.png\tHeatmap image\n"
 	"\t\tOR:\n"
 	"\t-s 0..255\tMacroblock sensitivity\n"
 	"\t-o outro\tFrames to record after motion has ceased\n"
 	"\t-r rate\t\tEncoding framerate\n"
-	"\t-t 0..100\tMacroblocks over threshold to trigger (%%)\n"
+	"\t-t 0..100\tMacroblocks over threshold to trigger (raw)\n"
 	"\t-v\t\tVerbose\n"
 	"\t-z pattern\tDump motion vector images (debug)\n"
 	"\n", name);
@@ -587,12 +591,57 @@ static void usage(const char *name)
 
 
 
+static void run(enum recstate state, char *url)
+{
+	pid_t pid;
+
+	if (!ctx.command)
+		return;
+	pid = fork();
+	if (pid)
+		return;
+
+	execlp(ctx.command, ctx.command,
+		(state == recording) ? "start" : "stop",
+		url,
+		NULL);
+	exit(0);
+}
+
+
+
 static void startrecording(void)
 {
-	if (openoutput() != 0) {
+	struct tm		tm;
+	time_t			t;
+	char			url[256];
+	AVFormatContext		*oc;
+	unsigned int		ftw;
+	int			i;
+
+	t = time(NULL);
+	localtime_r(&t, &tm);
+	snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
+		ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	if ((oc = openoutput(url, &ctx.vidindex)) == NULL) {
 		ctx.recstate = waiting;
 		return;
 	}
+
+	ctx.oc = oc;
+
+	ftw = ctx.framenum - ctx.previframe;
+	printf("Writing initial %d frames out...\n", ftw);
+
+	for (i = 0; i < ftw; i++) {
+		writeframe(oc, &ctx.frames[(ctx.previframe + i) & (INMEMFRAMES-1)],
+				ctx.vidindex);
+	}
+
+	run(recording, url);
+	printf("done.\n");
 }
 
 
@@ -604,12 +653,16 @@ static void stoprecording(void)
 		av_write_trailer(ctx.oc);
 		avcodec_close(ctx.oc->streams[ctx.vidindex]->codec);
 		avio_close(ctx.oc->pb);
+		run(waiting, ctx.oc->filename);
 		avformat_free_context(ctx.oc);
 		ctx.oc = NULL;
 	} else {
+		run(waiting, "");
 		close(ctx.fd);
 		ctx.fd = -1;
 	}
+
+	printf("Done.\n");
 }
 
 
@@ -629,10 +682,10 @@ static void checkstate(struct frame *f)
 		}
 		break;
 	case recording:
-		writeframe(f);
+		writeframe(ctx.oc, f, ctx.vidindex);
 		break;
 	case stopping:
-		writeframe(f);
+		writeframe(ctx.oc, f, ctx.vidindex);
 		if ((ctx.framenum - ctx.lastevent) > ctx.outro &&
 			(f->flags & OMX_BUFFERFLAG_SYNCFRAME)) {
 			ctx.recstate = waiting;
@@ -659,6 +712,7 @@ int main(int argc, char *argv[])
 	int		fd;
 	char		*mapfile = NULL;
 	int		threshold, sensitivity;
+	char		*url = NULL;
 
 /* Various OpenMAX configuration parameters: */
 	OMX_VIDEO_PARAM_AVCTYPE		*avc;
@@ -696,6 +750,8 @@ int main(int argc, char *argv[])
 	if (argc < 2)
 		usage(argv[0]);
 
+	signal(SIGCHLD, SIG_IGN);
+
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.bitrate = 2*1024*1024;
 	ctx.framerate = 25;
@@ -712,16 +768,22 @@ int main(int argc, char *argv[])
 	pthread_cond_init(&ctx.cond, NULL);
 	TAILQ_INIT(&packetq);
 
-	while ((opt = getopt(argc, argv, "b:d:hm:o:r:s:t:vz")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:d:e:hm:o:r:s:t:vz")) != -1) {
 		switch (opt) {
 		int l;
 		case 'b':
 			ctx.bitrate = atoi(optarg)*1024*1024;
 			break;
+		case 'c':
+			url = optarg;
+			break;
 		case 'd':
 			l = strlen(optarg)+1;
 			ctx.outdir = malloc(l);
 			memcpy(ctx.outdir, optarg, l);
+			break;
+		case 'e':
+			ctx.command = optarg;
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -850,6 +912,7 @@ int main(int argc, char *argv[])
 	OERRw(OMX_SetConfig(enc, OMX_IndexParamBrcmNALSSeparate, cbool));
 	obool->bEnabled = OMX_TRUE;
 	obool->nPortIndex = PORT_ENC + 1;
+	OERRw(OMX_SetParameter(enc, OMX_IndexParamBrcmVideoAVCInlineHeaderEnable, obool));
 	OERRw(OMX_SetParameter(enc,
 		OMX_IndexParamBrcmVideoAVCInlineVectorsEnable, obool));
 	avc->nPortIndex = PORT_ENC + 1;
@@ -925,6 +988,10 @@ WAIT;
 
 	dumpport(cam, PORT_CAM+1);
 
+	if (url) {
+		ctx.coc = openoutput(url, &ctx.cocvidindex);
+	}
+
 	OERR(OMX_FillThisBuffer(enc, ctx.encbufs));
 	do {
 		pthread_mutex_lock(&ctx.lock);
@@ -993,18 +1060,21 @@ WAIT;
 					ctx.sps = malloc(pkt->len);
 					memcpy(ctx.sps, pkt->buf, pkt->len);
 					ctx.spslen = pkt->len;
-					printf("New SPS, length %d\n",
-							ctx.spslen);
+//					printf("New SPS, length %d\n",
+//							ctx.spslen);
 				} else if (nt == 8) {
 					if (ctx.pps)
 						free(ctx.pps);
 					ctx.pps = malloc(pkt->len);
 					memcpy(ctx.pps, pkt->buf, pkt->len);
 					ctx.ppslen = pkt->len;
-					printf("New PPS, length %d\n",
-							ctx.ppslen);
+//					printf("New PPS, length %d\n",
+//							ctx.ppslen);
 				}
 			}
+
+			if (ctx.coc)
+				writeframe(ctx.coc, pkt, ctx.cocvidindex);
 
 			checkstate(pkt);
 
