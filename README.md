@@ -70,7 +70,7 @@ udp://@224.0.0.40:5554 or similar; view in mplayer or vlc with the same URL.
 
 ```-e``` executes the nominated command when recording starts or stops.  It's
 passed either 'start' or 'stop' in $1, with the filename of the newly-opened
-output file in $2 on start.
+output file in $2.
 
 ```-t``` is the number of above-trigger-threshold blocks to trigger recording on, as a percentage.
 
