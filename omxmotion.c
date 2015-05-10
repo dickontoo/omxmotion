@@ -767,7 +767,6 @@ int main(int argc, char *argv[])
 	ctx.flags = 0; //FLAGS_VERBOSE;
 	ctx.width = 1920;
 	ctx.height = 1080;
-	ctx.outdir = ".";
 	ctx.recstate = waiting;
 	ctx.debounce = DEBOUNCE;
 	ctx.fd = -1;
