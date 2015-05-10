@@ -242,6 +242,9 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 	int r;
 	AVRational omxtimebase = { 1, 1000000 };
 
+	if (!oc)
+		return;
+
 	if (ctx.fd != -1) {
 		write(ctx.fd, f->buf, f->len);
 		free(f->buf);
@@ -621,23 +624,29 @@ static void startrecording(void)
 
 	t = time(NULL);
 	localtime_r(&t, &tm);
-	snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
-		ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec);
+	if (ctx.outdir) {
+		snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
+			ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-	if ((oc = openoutput(url, &ctx.vidindex)) == NULL) {
-		ctx.recstate = waiting;
-		return;
-	}
+		if ((oc = openoutput(url, &ctx.vidindex)) == NULL) {
+			ctx.recstate = waiting;
+			return;
+		}
 
-	ctx.oc = oc;
+		ctx.oc = oc;
 
-	ftw = ctx.framenum - ctx.previframe;
-	printf("Writing initial %d frames out...\n", ftw);
+		ftw = ctx.framenum - ctx.previframe;
+		printf("Writing initial %d frames out...\n", ftw);
 
-	for (i = 0; i < ftw; i++) {
-		writeframe(oc, &ctx.frames[(ctx.previframe + i) & (INMEMFRAMES-1)],
-				ctx.vidindex);
+		for (i = 0; i < ftw; i++) {
+			writeframe(oc, &ctx.frames[(ctx.previframe + i) & (INMEMFRAMES-1)],
+					ctx.vidindex);
+		}
+	} else {
+		snprintf(url, sizeof(url), "%d-%02d-%02dT%02d:%02d:%02d.mkv",
+			tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
 	}
 
 	run(recording, url);
