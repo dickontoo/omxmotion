@@ -312,7 +312,7 @@ static AVFormatContext *openoutput(char *url, int *index)
 		exit(1);
 	}
 
-	ctx.oc = oc = avformat_alloc_context();
+	oc = avformat_alloc_context();
 	if (!oc) {
 		fprintf(stderr, "Failed to alloc outputcontext\n");
 		exit(1);
@@ -644,7 +644,7 @@ static void startrecording(void)
 					ctx.vidindex);
 		}
 	} else {
-		snprintf(url, sizeof(url), "%d-%02d-%02dT%02d:%02d:%02d.mkv",
+		snprintf(url, sizeof(url), "%d-%02d-%02dT%02d:%02d:%02d",
 			tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 			tm.tm_hour, tm.tm_min, tm.tm_sec);
 	}
@@ -659,12 +659,16 @@ static void stoprecording(void)
 {
 	printf("\nStopping recording\n");
 	if (ctx.fd == -1) {
-		av_write_trailer(ctx.oc);
-		avcodec_close(ctx.oc->streams[ctx.vidindex]->codec);
-		avio_close(ctx.oc->pb);
-		run(waiting, ctx.oc->filename);
-		avformat_free_context(ctx.oc);
-		ctx.oc = NULL;
+		if (ctx.oc) {
+			av_write_trailer(ctx.oc);
+			avcodec_close(ctx.oc->streams[ctx.vidindex]->codec);
+			avio_close(ctx.oc->pb);
+			run(waiting, ctx.oc->filename);
+			avformat_free_context(ctx.oc);
+			ctx.oc = NULL;
+		} else {
+			run(waiting, "");
+		}
 	} else {
 		run(waiting, "");
 		close(ctx.fd);
