@@ -258,8 +258,12 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 	if (f->flags & OMX_BUFFERFLAG_SYNCFRAME)
 		pkt.flags |= AV_PKT_FLAG_KEY;
 
-	pkt.pts = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) |
-		f->tick.nLowPart), omxtimebase, oc->streams[0]->time_base);
+	if (f->tick.nHighPart == 0 && f->tick.nLowPart == 0) {
+		pkt.pts = AV_NOPTS_VALUE;
+	} else {
+		pkt.pts = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) |
+			f->tick.nLowPart), omxtimebase, oc->streams[0]->time_base);
+	}
 
 	pkt.dts = pkt.pts; // AV_NOPTS_VALUE; // dts;
 	pkt.stream_index = index;
@@ -270,7 +274,7 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 	if (r != 0) {
 		char err[256];
 		av_strerror(r, err, sizeof(err));
-		printf("Failed to write a video frame: %s\n", err);
+		printf("Failed to write frame %d (%x.%x): %s\n", ctx.framenum, f->tick.nHighPart, f->tick.nLowPart, err);
 	}
 	av_write_frame(oc, NULL);
 }
@@ -284,7 +288,7 @@ static AVFormatContext *openoutput(char *url, int *index)
 	char			err[256];
 	AVOutputFormat		*fmt;
 	int			i;
-	AVStream		*oflow;
+	AVStream		*st;
 	AVCodec			*c;
 	AVCodecContext		*cc;
 	AVRational		omxtimebase = { 1, 1000000 };
@@ -312,9 +316,10 @@ static AVFormatContext *openoutput(char *url, int *index)
 		exit(1);
 	}
 
-	oc = avformat_alloc_context();
-	if (!oc) {
-		fprintf(stderr, "Failed to alloc outputcontext\n");
+	r = avformat_alloc_output_context2(&oc, fmt, NULL, url);
+	if (r != 0) {
+		av_strerror(r, err, sizeof(err));
+		fprintf(stderr, "Failed to alloc outputcontext: %s\n", err);
 		exit(1);
 	}
 	oc->oformat = fmt;
@@ -325,19 +330,23 @@ static AVFormatContext *openoutput(char *url, int *index)
 	oc->start_time_realtime = time(NULL) * 1000000;
 	oc->bit_rate = ctx.bitrate;
 
-	c = avcodec_find_encoder(CODEC_ID_H264);
-	oflow = avformat_new_stream(oc, c);
-	cc = oflow->codec;
+	c = avcodec_find_encoder(AV_CODEC_ID_H264);
+	st = avformat_new_stream(oc, c);
+	st->id = oc->nb_streams - 1;
+	cc = st->codec;
+//	cc = avcodec_alloc_context3(c);
 	cc->width = ctx.width;
 	cc->height = ctx.height;
-	cc->codec_id = CODEC_ID_H264;
+	cc->codec_id = AV_CODEC_ID_H264;
 	cc->codec_type = AVMEDIA_TYPE_VIDEO;
 	cc->bit_rate = ctx.bitrate;
 	cc->profile = FF_PROFILE_H264_HIGH;
 	cc->level = 41;
-	cc->time_base = omxtimebase;
-	oflow->time_base = omxtimebase;
-	*index = oflow->index;
+	cc->time_base.den = ctx.framerate;
+	cc->time_base.num = 1;
+	cc->pix_fmt = PIX_FMT_YUV420P;
+	st->time_base = omxtimebase;
+	*index = st->index;
 
 	if (ctx.spslen + ctx.ppslen > 0) {
 		if (cc->extradata) {
@@ -351,11 +360,12 @@ static AVFormatContext *openoutput(char *url, int *index)
 
 	framerate.num = ctx.framerate;
 	framerate.den = 1;
-	oflow->avg_frame_rate = framerate;
-	oflow->r_frame_rate = framerate;
+	st->avg_frame_rate = framerate;
+	st->r_frame_rate = framerate;
 	f = &ctx.frames[ctx.previframe & (INMEMFRAMES-1)];
-	oflow->start_time = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) | 
-		f->tick.nLowPart), omxtimebase, oflow->time_base);
+	st->start_time = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) | 
+		f->tick.nLowPart), omxtimebase, st->time_base);
+	oc->start_time = st->start_time;
 	for (i = 0; i < oc->nb_streams; i++) {
 		if (oc->oformat->flags & AVFMT_GLOBALHEADER)
 			oc->streams[i]->codec->flags
@@ -363,6 +373,13 @@ static AVFormatContext *openoutput(char *url, int *index)
 		if (oc->streams[i]->codec->sample_rate == 0)
 			oc->streams[i]->codec->sample_rate = 48000; /* ish */
 	}
+
+//	r = avcodec_open2(cc, c, NULL);
+	if (r != 0) {
+		av_strerror(r, err, sizeof(err));
+		printf("Failed to open codec: %d (%p, %p): %s\n", r, cc, c, err);
+	}
+		
 
 /* At some point they changed the API: */
 #ifndef URL_WRONLY
@@ -378,7 +395,6 @@ static AVFormatContext *openoutput(char *url, int *index)
 		return NULL;
 	}
 	av_dump_format(oc, 0, url, 1);
-
 
 	return oc;
 }
@@ -625,7 +641,7 @@ static void startrecording(void)
 	t = time(NULL);
 	localtime_r(&t, &tm);
 	if (ctx.outdir) {
-		snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
+		snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.ts",
 			ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 			tm.tm_hour, tm.tm_min, tm.tm_sec);
 
@@ -744,6 +760,7 @@ int main(int argc, char *argv[])
 	OMX_TIME_CONFIG_SCALETYPE	*timescale;
 	OMX_VIDEO_PORTDEFINITIONTYPE	*viddef;
 	OMX_BUFFERHEADERTYPE		*spare;
+	OMX_PARAM_TIMESTAMPMODETYPE	*timestamp;
 
 	MAKEME(avc, OMX_VIDEO_PARAM_AVCTYPE);
 	MAKEME(bitrate, OMX_VIDEO_PARAM_BITRATETYPE);
@@ -759,6 +776,7 @@ int main(int argc, char *argv[])
 	MAKEME(refclock, OMX_TIME_CONFIG_ACTIVEREFCLOCKTYPE);
 	MAKEME(smt, OMX_PARAM_SENSORMODETYPE);
 	MAKEME(timescale, OMX_TIME_CONFIG_SCALETYPE);
+	MAKEME(timestamp, OMX_PARAM_TIMESTAMPMODETYPE);
 
 	if (argc < 2)
 		usage(argv[0]);
@@ -834,6 +852,7 @@ int main(int argc, char *argv[])
 		NULL);
 
 	av_register_all();
+	avcodec_register_all();
 
 	pthread_mutex_init(&ctx.lock, NULL);
 
@@ -888,6 +907,9 @@ int main(int argc, char *argv[])
 	OERR(OMX_GetParameter(cam, OMX_IndexParamPortDefinition, portdef));
 	portdef->nPortIndex = PORT_CAM + 0;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamPortDefinition, portdef));
+	timestamp->eTimestampMode =  OMX_TimestampModeRawStc;
+	OERR(OMX_SetParameter(cam, OMX_IndexParamCommonUseStcTimestamps,
+				timestamp));
 	smt->nPortIndex = OMX_ALL;
 	smt->sFrameSize.nPortIndex = OMX_ALL;
 	OERR(OMX_GetParameter(cam, OMX_IndexParamCommonSensorMode, smt));
@@ -924,7 +946,9 @@ int main(int argc, char *argv[])
 	OERRw(OMX_SetConfig(enc, OMX_IndexParamBrcmNALSSeparate, cbool));
 	obool->bEnabled = OMX_TRUE;
 	obool->nPortIndex = PORT_ENC + 1;
-	OERRw(OMX_SetParameter(enc, OMX_IndexParamBrcmVideoAVCInlineHeaderEnable, obool));
+//	if (!ctx.outdir)
+//		OERRw(OMX_SetParameter(enc,
+//			OMX_IndexParamBrcmVideoAVCInlineHeaderEnable, obool));
 	OERRw(OMX_SetParameter(enc,
 		OMX_IndexParamBrcmVideoAVCInlineVectorsEnable, obool));
 	avc->nPortIndex = PORT_ENC + 1;
@@ -1000,10 +1024,6 @@ WAIT;
 
 	dumpport(cam, PORT_CAM+1);
 
-	if (url) {
-		ctx.coc = openoutput(url, &ctx.cocvidindex);
-	}
-
 	OERR(OMX_FillThisBuffer(enc, ctx.encbufs));
 	do {
 		pthread_mutex_lock(&ctx.lock);
@@ -1017,6 +1037,7 @@ WAIT;
 		while (spare) {
 			struct frame *pkt;
 			OMX_TICKS tick = spare->nTimeStamp;
+			int nt = 0;
 
 			tmpbuf = av_realloc(tmpbuf,
 					tmpbufoff + spare->nFilledLen);
@@ -1065,7 +1086,7 @@ WAIT;
 
 			if (pkt->buf[0] == 0 && pkt->buf[1] == 0 &&
 					pkt->buf[2] == 0 && pkt->buf[3] == 1) {
-				int nt = pkt->buf[4] & 0x1f;
+				nt = pkt->buf[4] & 0x1f;
 				if (nt == 7) {
 					if (ctx.sps)
 						free(ctx.sps);
@@ -1083,12 +1104,16 @@ WAIT;
 //					printf("New PPS, length %d\n",
 //							ctx.ppslen);
 				}
+				if (url && ctx.spslen && ctx.ppslen) {
+					ctx.coc = openoutput(url, &ctx.cocvidindex);
+					url = NULL;
+				}
 			}
-
 			if (ctx.coc)
 				writeframe(ctx.coc, pkt, ctx.cocvidindex);
 
-			checkstate(pkt);
+			if (nt != 7 && nt != 8)
+				checkstate(pkt);
 
 			spare->nFilledLen = 0;
 			spare->nOffset = 0;
