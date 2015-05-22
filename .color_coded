@@ -1,0 +1,8 @@
+-I../rpi/firmware/opt/vc/include/IL
+-I../rpi/firmware/opt/vc/include
+-I../rpi/firmware/opt/vc/include/interface/vcos/pthreads
+-I../rpi/firmware/opt/vc/include/interface/vmcs_host/linux
+-std=c11
+-x
+c
+
