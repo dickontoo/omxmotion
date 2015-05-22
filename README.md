@@ -49,9 +49,7 @@ Where:
         -h              This help
 
         -m mapfile.png  Heatmap image
-
                 OR:
-
         -s 0..255       Macroblock sensitivity
 
         -o outro        Frames to record after motion has ceased
@@ -80,14 +78,14 @@ like "-f 'Office: %FT%T'".  The timings aren't accurate: currently it's
 accurate to the second from when the frame was received from the OMX stack.
 
 ```-t``` is the number of above-trigger-threshold blocks to trigger recording
-on, as a percentage.
+on.
 
 ```-z``` is best ignored for now.
 
-```-s``` is the threshold above which motion is assumed for this macroblock.  This
-isn't as flexible as the mapfile option -- it simply sets the internal
-structure to the flat figure you specify -- and passing both ```-s``` and ```-m``` isn't
-an error, but ```-m``` takes precidence.
+```-s``` is the threshold above which motion is assumed for this macroblock.
+This isn't as flexible as the mapfile option -- it simply sets the internal
+structure to the flat figure you specify -- and passing both ```-s``` and
+```-m``` isn't an error, but ```-m``` takes precedence.
 
 ```-m``` mapfile is the fun one.  In most uses of software like this, there are
 regions of the frame which you aren't interested in.  Passing a mapfile
