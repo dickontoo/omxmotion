@@ -80,6 +80,7 @@ struct frame {
 	int		len;
 	OMX_TICKS	tick;
 	int		flags;
+	time_t		time;
 };
 
 
@@ -94,6 +95,7 @@ struct context {
 	pthread_cond_t	cond;
 	pthread_cond_t	framecond;
 	AVBitStreamFilterContext *bsfc;
+	char		*subs;
 	enum recstate	recstate;
 	pthread_t	recthread;
 	int		width, height;

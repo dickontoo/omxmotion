@@ -595,6 +595,7 @@ static void usage(const char *name)
 	"\t-c url\tContinuous streaming URL\n"
 	"\t-d outputdir\tRecordings directory\n"
 	"\t-e command\tExecute $command on state change\n"
+	"\t-f format\tSubtitle format\n"
 	"\t-h\t\tThis help\n"
 	"\t-m mapfile.png\tHeatmap image\n"
 	"\t\tOR:\n"
@@ -629,6 +630,59 @@ static void run(enum recstate state, char *url)
 
 
 
+
+struct sctx {
+	FILE	*fd;
+	int	n;
+	int	ot;		/* Old time */
+	int	to;		/* Offset of timestamp from file start */
+	int	nspf;
+	int	fc;
+};
+
+static void sub(struct sctx *sctx, struct frame *f)
+{
+	struct tm		tm;
+	char			st[256];
+
+	if (sctx->nspf == 0) {	/* Proxy for uninitialised */
+		sctx->nspf = 1000 / ctx.framerate;
+		sctx->ot = f->time;
+		sctx->to = -1;
+		sctx->n = 1;
+	}
+
+	if (f->time == sctx->ot) {
+		sctx->fc++;
+		return;
+	}
+	sctx->ot = f->time;
+
+	if (sctx->to == -1) {
+		sctx->to = sctx->nspf * sctx->fc;
+	}
+
+	localtime_r(&f->time, &tm);
+	if (strftime(st, sizeof(st), ctx.subs, &tm) != 0) {
+		int hh, mm, ss, nh, nm, ns;
+		int n = sctx->n;
+		hh =  n / 3600;
+		mm = (n / 60) % 60;
+		ss = (n % 60);
+
+		n++;
+		nh =  n / 3600;
+		nm = (n / 60) % 60;
+		ns = (n % 60);
+
+		fprintf(sctx->fd, "%d\n%02d:%02d:%02d,%03d --> "
+				"%02d:%02d:%02d,%03d\n%s\n\n", sctx->n++,
+				hh, mm, ss, sctx->to, nh, nm, ns, sctx->to, st);
+	}
+}
+
+
+
 static void *startrecording(void *args)
 {
 	struct tm		tm;
@@ -641,9 +695,20 @@ static void *startrecording(void *args)
 	int			index;
 	pthread_t		self;
 	int			done;
+	struct sctx		sctx;
 
 	t = time(NULL);
 	localtime_r(&t, &tm);
+
+	memset(&sctx, 0, sizeof(sctx));
+	sctx.fd = NULL;
+	if (ctx.subs) {
+		snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.srt",
+			ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
+		sctx.fd = fopen(url, "w");
+	}
+
 	snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
 			ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 			tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -660,7 +725,10 @@ static void *startrecording(void *args)
 	printf("Writing initial %d frames out...\n", ftw);
 
 	rp = pfn & (INMEMFRAMES - 1);
+
 	for (i = 0; i < ftw; i++) {
+		if (ctx.subs)
+			sub(&sctx, &ctx.frames[rp]);
 		writeframe(oc, &ctx.frames[rp], index);
 		rp++;
 		rp &= (INMEMFRAMES - 1);
@@ -688,6 +756,8 @@ static void *startrecording(void *args)
 			done = 1;
 		pthread_mutex_unlock(&ctx.lock);
 		for (i = 0; i < ftw; i++) {
+			if (ctx.subs)
+				sub(&sctx, &ctx.frames[rp]);
 			writeframe(oc, &ctx.frames[rp], index);
 			rp++;
 			rp &= (INMEMFRAMES-1);
@@ -714,6 +784,11 @@ static void *startrecording(void *args)
 		run(waiting, "");
 		close(ctx.fd);
 		ctx.fd = -1;
+	}
+
+	if (ctx.subs) {
+		fflush(sctx.fd);
+		fclose(sctx.fd);
 	}
 
 	printf("\nDone.\n");
@@ -823,7 +898,7 @@ int main(int argc, char *argv[])
 	pthread_cond_init(&ctx.cond, NULL);
 	TAILQ_INIT(&packetq);
 
-	while ((opt = getopt(argc, argv, "b:c:d:e:hm:o:r:s:t:vz")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:d:e:f:hm:o:r:s:t:vz")) != -1) {
 		switch (opt) {
 		int l;
 		case 'b':
@@ -839,6 +914,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			ctx.command = optarg;
+			break;
+		case 'f':
+			ctx.subs = optarg;
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -932,7 +1010,7 @@ int main(int argc, char *argv[])
 	OERR(OMX_GetParameter(cam, OMX_IndexParamPortDefinition, portdef));
 	portdef->nPortIndex = PORT_CAM + 0;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamPortDefinition, portdef));
-	timestamp->eTimestampMode =  OMX_TimestampModeRawStc;
+	timestamp->eTimestampMode =  OMX_TimestampModeResetStc;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamCommonUseStcTimestamps,
 				timestamp));
 	smt->nPortIndex = OMX_ALL;
@@ -1089,6 +1167,7 @@ WAIT;
 			}
 
 			pkt = &ctx.frames[ctx.framenum % INMEMFRAMES];
+			pkt->time = time(NULL);
 			if (pkt->buf) {
 				av_free(pkt->buf);
 				pkt->buf = NULL;

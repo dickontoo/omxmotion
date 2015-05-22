@@ -38,11 +38,13 @@ Usage: ./omxmotion [-b bitrate] [-d outputdir] [-r framerate ] [ etc ]
 Where:
         -b bitrate      Target bitrate (Mb/s)
 
-        -c url  Continuous streaming URL
+        -c url  	Continuous streaming URL
 
         -d outputdir    Recordings directory
 
         -e command      Execute $command on state change
+
+	-f format	Drop timestamps into a subtitle file in $format
 
         -h              This help
 
@@ -72,7 +74,13 @@ udp://@224.0.0.40:5554 or similar; view in mplayer or vlc with the same URL.
 passed either 'start' or 'stop' in $1, with the filename of the newly-opened
 output file in $2.
 
-```-t``` is the number of above-trigger-threshold blocks to trigger recording on, as a percentage.
+```-f``` makes an srt file per recording, with embedded timestamps.  mplayer
+seems to get the timings a bit wrong, but they work in vlc.  Use something
+like "-f 'Office: %FT%T'".  The timings aren't accurate: currently it's
+accurate to the second from when the frame was received from the OMX stack.
+
+```-t``` is the number of above-trigger-threshold blocks to trigger recording
+on, as a percentage.
 
 ```-z``` is best ignored for now.
 
