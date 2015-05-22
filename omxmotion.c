@@ -262,7 +262,7 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 		pkt.pts = AV_NOPTS_VALUE;
 	} else {
 		pkt.pts = av_rescale_q(((((uint64_t) f->tick.nHighPart)<<32) |
-			f->tick.nLowPart), omxtimebase, oc->streams[0]->time_base);
+			f->tick.nLowPart), omxtimebase, oc->streams[index]->time_base);
 	}
 
 	pkt.dts = pkt.pts; // AV_NOPTS_VALUE; // dts;
@@ -276,7 +276,7 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 		av_strerror(r, err, sizeof(err));
 		printf("Failed to write frame %d (%x.%x): %s\n", ctx.framenum, f->tick.nHighPart, f->tick.nLowPart, err);
 	}
-	av_write_frame(oc, NULL);
+//	av_write_frame(oc, NULL);
 }
 
 
@@ -405,7 +405,7 @@ static void motioncallback(void *context, enum movementevents state)
 {
 	context = context;	/* Shush */
 	pthread_mutex_lock(&ctx.lock);
-	printf("\nmotioncallback(%d) called at frame %d\n", state, ctx.framenum);
+//	printf("\nmotioncallback(%d) called at frame %d\n", state, ctx.framenum);
 	ctx.lastevent = ctx.framenum;
 	if (state == quiescent) {
 		switch (ctx.recstate) {
@@ -629,7 +629,7 @@ static void run(enum recstate state, char *url)
 
 
 
-static void startrecording(void)
+static void *startrecording(void *args)
 {
 	struct tm		tm;
 	time_t			t;
@@ -637,51 +637,76 @@ static void startrecording(void)
 	AVFormatContext		*oc;
 	unsigned int		ftw;
 	int			i;
+	unsigned int		rp, pfn;
+	int			index;
+	pthread_t		self;
+	int			done;
 
 	t = time(NULL);
 	localtime_r(&t, &tm);
-	if (ctx.outdir) {
-		snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.ts",
+	snprintf(url, sizeof(url), "%s/%d-%02d-%02dT%02d:%02d:%02d.mkv",
 			ctx.outdir, tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 			tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-		if ((oc = openoutput(url, &ctx.vidindex)) == NULL) {
-			ctx.recstate = waiting;
-			return;
-		}
+	if ((oc = openoutput(url, &index)) == NULL) {
+		ctx.recstate = waiting;
+		return NULL;
+	}
 
-		ctx.oc = oc;
+	pthread_mutex_lock(&ctx.lock);
+	pfn = ctx.previframe;
+	ftw = ctx.framenum - pfn;
+	pthread_mutex_unlock(&ctx.lock);
+	printf("Writing initial %d frames out...\n", ftw);
 
-		ftw = ctx.framenum - ctx.previframe;
-		printf("Writing initial %d frames out...\n", ftw);
-
-		for (i = 0; i < ftw; i++) {
-			writeframe(oc, &ctx.frames[(ctx.previframe + i) & (INMEMFRAMES-1)],
-					ctx.vidindex);
-		}
-	} else {
+	rp = pfn & (INMEMFRAMES - 1);
+	for (i = 0; i < ftw; i++) {
+		writeframe(oc, &ctx.frames[rp], index);
+		rp++;
+		rp &= (INMEMFRAMES - 1);
+	}
+	pfn += ftw;
+	if (!ctx.outdir) {
 		snprintf(url, sizeof(url), "%d-%02d-%02dT%02d:%02d:%02d",
 			tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 			tm.tm_hour, tm.tm_min, tm.tm_sec);
+		run(recording, url);
+		return NULL;
 	}
 
-	run(recording, url);
 	printf("done.\n");
-}
 
+/* This is a little messy, but there's a race condition: */
+	self = pthread_self();
+	done = 0;
 
+	while (1) {
+		pthread_mutex_lock(&ctx.lock);
+		pthread_cond_wait(&ctx.framecond, &ctx.lock);
+		ftw = ctx.framenum - pfn;
+		if (ctx.recthread != self || ctx.recstate == waiting)
+			done = 1;
+		pthread_mutex_unlock(&ctx.lock);
+		for (i = 0; i < ftw; i++) {
+			writeframe(oc, &ctx.frames[rp], index);
+			rp++;
+			rp &= (INMEMFRAMES-1);
+		}
+		pfn += ftw;
 
-static void stoprecording(void)
-{
-	printf("\nStopping recording\n");
+		if (done)
+			break;
+	}
+
+	printf("\nStopping recording %s at frame %d\n", url, pfn);
 	if (ctx.fd == -1) {
-		if (ctx.oc) {
-			av_write_trailer(ctx.oc);
-			avcodec_close(ctx.oc->streams[ctx.vidindex]->codec);
-			avio_close(ctx.oc->pb);
-			run(waiting, ctx.oc->filename);
-			avformat_free_context(ctx.oc);
-			ctx.oc = NULL;
+		if (oc) {
+			av_write_trailer(oc);
+			avcodec_close(oc->streams[index]->codec);
+			avio_close(oc->pb);
+			run(waiting, oc->filename);
+			avformat_free_context(oc);
+			oc = NULL;
 		} else {
 			run(waiting, "");
 		}
@@ -691,7 +716,9 @@ static void stoprecording(void)
 		ctx.fd = -1;
 	}
 
-	printf("Done.\n");
+	printf("\nDone.\n");
+
+	return NULL;
 }
 
 
@@ -704,24 +731,22 @@ static void checkstate(struct frame *f)
 		break;
 	case triggered:
 		if ((ctx.framenum - ctx.lastevent) > ctx.debounce) {
+			pthread_attr_t detach;
+			pthread_attr_init(&detach);
+			pthread_attr_setdetachstate(&detach, PTHREAD_CREATE_DETACHED);
 			ctx.recstate = recording;
-			pthread_mutex_unlock(&ctx.lock);
-			startrecording();
-			return;
+			pthread_create(&ctx.recthread, &detach, startrecording, NULL);
 		}
 		break;
 	case recording:
-		writeframe(ctx.oc, f, ctx.vidindex);
+		pthread_cond_signal(&ctx.framecond);
 		break;
 	case stopping:
-		writeframe(ctx.oc, f, ctx.vidindex);
 		if ((ctx.framenum - ctx.lastevent) > ctx.outro &&
 			(f->flags & OMX_BUFFERFLAG_SYNCFRAME)) {
 			ctx.recstate = waiting;
-			pthread_mutex_unlock(&ctx.lock);
-			stoprecording();
-			return;
-		}		
+		}
+		pthread_cond_signal(&ctx.framecond);
 		break;
 	}
 	pthread_mutex_unlock(&ctx.lock);
@@ -946,9 +971,6 @@ int main(int argc, char *argv[])
 	OERRw(OMX_SetConfig(enc, OMX_IndexParamBrcmNALSSeparate, cbool));
 	obool->bEnabled = OMX_TRUE;
 	obool->nPortIndex = PORT_ENC + 1;
-//	if (!ctx.outdir)
-//		OERRw(OMX_SetParameter(enc,
-//			OMX_IndexParamBrcmVideoAVCInlineHeaderEnable, obool));
 	OERRw(OMX_SetParameter(enc,
 		OMX_IndexParamBrcmVideoAVCInlineVectorsEnable, obool));
 	avc->nPortIndex = PORT_ENC + 1;
@@ -1108,7 +1130,15 @@ WAIT;
 					ctx.coc = openoutput(url, &ctx.cocvidindex);
 					url = NULL;
 				}
+				if (nt == 7 || nt == 8) {
+					spare->nFilledLen = 0;
+					spare->nOffset = 0;
+					OERRq(OMX_FillThisBuffer(enc, spare));
+					spare = spare->pAppPrivate;
+					continue;
+				}
 			}
+			ctx.framenum++;
 			if (ctx.coc)
 				writeframe(ctx.coc, pkt, ctx.cocvidindex);
 
@@ -1119,8 +1149,6 @@ WAIT;
 			spare->nOffset = 0;
 			OERRq(OMX_FillThisBuffer(enc, spare));
 			spare = spare->pAppPrivate;
-
-			ctx.framenum++;
 		}
 	} while (1);
 

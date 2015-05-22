@@ -85,17 +85,17 @@ struct frame {
 
 
 struct context {
-	AVFormatContext *oc;
 	AVFormatContext *coc;
-	int		vidindex;
 	int		cocvidindex;
 	volatile int	flags;
 	OMX_BUFFERHEADERTYPE *encbufs, *bufhead;
 	OMX_HANDLETYPE	clk, cam, enc, nul;
 	pthread_mutex_t	lock;
 	pthread_cond_t	cond;
+	pthread_cond_t	framecond;
 	AVBitStreamFilterContext *bsfc;
 	enum recstate	recstate;
+	pthread_t	recthread;
 	int		width, height;
 	int		bitrate;
 	int		framerate;
