@@ -36,15 +36,16 @@ Trivially:
 Usage: ./omxmotion [-b bitrate] [-d outputdir] [-r framerate ] [ etc ]
 
 Where:
+
         -b bitrate      Target bitrate (Mb/s)
 
-        -c url  	Continuous streaming URL
+        -c url          Continuous streaming URL
 
         -d outputdir    Recordings directory
 
         -e command      Execute $command on state change
 
-        -f format	Drop timestamps into a subtitle file in $format
+        -f format       Drop timestamps into a subtitle file in $format
 
         -h              This help
 
@@ -52,7 +53,7 @@ Where:
                 OR:
         -s 0..255       Macroblock sensitivity
 
-        -n		ncurses visualisation
+        -n              ncurses visualisation
 
         -o outro        Frames to record after motion has ceased
 
