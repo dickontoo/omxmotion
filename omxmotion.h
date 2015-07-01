@@ -30,6 +30,12 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
+#include <time.h>
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 1
+#endif
+
 #include "bcm_host.h"
 #include "libavformat/avformat.h"
 #include "libavutil/avutil.h"
@@ -52,7 +58,6 @@
 #include <sys/queue.h>
 #include <fcntl.h>
 
-#include <time.h>
 #include <errno.h>
 
 #include <unistd.h>
@@ -125,8 +130,6 @@ struct context {
 #define FLAGS_MONITOR		(1<<2)
 #define FLAGS_RAW		(1<<4)
 #define FLAGS_NOSUBS		(1<<5)
-/* Dump the vectors as PNG images, one file per frame: */
-#define FLAGS_DUMPVECTORIMAGES	(1<<31)
 
 
 extern struct context ctx;

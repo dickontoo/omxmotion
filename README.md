@@ -44,7 +44,7 @@ Where:
 
         -e command      Execute $command on state change
 
-	-f format	Drop timestamps into a subtitle file in $format
+        -f format	Drop timestamps into a subtitle file in $format
 
         -h              This help
 
@@ -52,11 +52,13 @@ Where:
                 OR:
         -s 0..255       Macroblock sensitivity
 
+        -n		ncurses visualisation
+
         -o outro        Frames to record after motion has ceased
 
         -r rate         Encoding framerate
 
-        -t 0..100       Macroblocks over threshold to trigger (raw)
+        -t 0..8228      Macroblocks over threshold to trigger (raw)
 
         -v              Verbose
 
@@ -98,7 +100,10 @@ well):
 
  * install the camera where you want it to live,
 
- * /opt/vc/bin/raspistill -w 1920 -h 1088 -o snapshot.jpg -awb auto
+ * Run omxmotion with a high sensitivity and low threshold and record some
+   motion,
+
+ * Take a snapshot of the frame,
 
  * convert snapshot.jpg -colorspace gray -colors 256 -resize 120x68 thumb.png
 
@@ -109,15 +114,19 @@ well):
    root@camera:/home/dickon/src/omxmotion# file heatmap.png 
    heatmap.png: PNG image data, 120 x 68, 8-bit grayscale, non-interlaced
 
+Please note: raspistill seems to use a different default set of defaults to
+omxmotion, which results in a different crop of the image that the camera
+produces.  Take a video and snapshot that instead.
+
 When editing the heatmap, you may find it easier to display the source
 snapshot alongside it.  When you've compressed the image to a small
 thumbnail and turned it greyscale, it can be surprisingly difficult to see
 what each pixel represents.  See the examples directory for what I mean.
 
-The camera only supports vertical resolutions that are a multiple of 32
-pixels.  1080 is not, so capture 1088.  Unfortunately, the macroblocks at
-the bottom of the screen get very noisy when scaled back to 1080, so make
-them white.
+```-n``` produces an ncurses-based display of which macroblocks are over
+their thresholds at any given frame.  Please resize your terminal to at
+least 121x69 before starting the application.  It has a side effect of
+producing corrupt output during the initialisation phase, so just ignore it.
 
 ```-z``` is a debugging tool.  If you find it triggering more than you expect,
 it's probably worth trying this:
@@ -183,7 +192,7 @@ A word of warning: high(ish)-bitrate multicast streams can do Bad Things
 (tm) to cheap wifi kit.  If you find your wifi network dropping out,
 firewall the packets from it.
 
-There are still no timings present in the streams.  This needs to change.
+Occasionally, files may not be created properly.  I'm looking into this.
 
 
 Licence guff:

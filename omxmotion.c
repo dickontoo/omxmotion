@@ -36,10 +36,6 @@
 #define OMX_SKIP64BIT
 #endif
 
-#include <time.h>
-#ifndef CLOCK_REALTIME
-#define CLOCK_REALTIME 1
-#endif
 #include "omxmotion.h"
 #include "motion.h"
 #include <unistd.h>
@@ -274,7 +270,7 @@ static void writeframe(AVFormatContext *oc, struct frame *f, int index)
 	if (r != 0) {
 		char err[256];
 		av_strerror(r, err, sizeof(err));
-		printf("Failed to write frame %d (%x.%x): %s\n", ctx.framenum, f->tick.nHighPart, f->tick.nLowPart, err);
+		fprintf(stderr, "Failed to write frame %d (%x.%x): %s\n", ctx.framenum, f->tick.nHighPart, f->tick.nLowPart, err);
 	}
 //	av_write_frame(oc, NULL);
 }
@@ -377,7 +373,10 @@ static AVFormatContext *openoutput(char *url, int *index)
 //	r = avcodec_open2(cc, c, NULL);
 	if (r != 0) {
 		av_strerror(r, err, sizeof(err));
-		printf("Failed to open codec: %d (%p, %p): %s\n", r, cc, c, err);
+
+		if (!(ctx.flags & FLAGS_MONITOR))
+			printf("Failed to open codec: %d (%p, %p): %s\n",
+				r, cc, c, err);
 	}
 		
 
@@ -387,14 +386,14 @@ static AVFormatContext *openoutput(char *url, int *index)
 #endif
 	avio_open(&oc->pb, url, URL_WRONLY);
 
-	printf("\n");
 	r = avformat_write_header(oc, NULL);
 	if (r < 0) {
 		av_strerror(r, err, sizeof(err));
 		fprintf(stderr, "Failed to write header: %s\n", err);
 		return NULL;
 	}
-	av_dump_format(oc, 0, url, 1);
+	if (!(ctx.flags & FLAGS_MONITOR))
+		av_dump_format(oc, 0, url, 1);
 
 	return oc;
 }
@@ -446,8 +445,10 @@ OMX_ERRORTYPE genericeventhandler(OMX_HANDLETYPE component,
 				OMX_U32 data2,
 				OMX_PTR eventdata)
 {
-	printf("Event %d on %p\n", event, component);
-	fflush(stdout);
+	if (ctx->flags & FLAGS_VERBOSE) {
+		printf("Event %d on %p\n", event, component);
+		fflush(stdout);
+	}
 
 	if (ctx->waiting) {
 		pthread_mutex_lock(&ctx->lock);
@@ -600,11 +601,13 @@ static void usage(const char *name)
 	"\t-m mapfile.png\tHeatmap image\n"
 	"\t\tOR:\n"
 	"\t-s 0..255\tMacroblock sensitivity\n"
+	"\t-n\t\tncurses visualisation of motion"
 	"\t-o outro\tFrames to record after motion has ceased\n"
 	"\t-r rate\t\tEncoding framerate\n"
 	"\t-t 0..100\tMacroblocks over threshold to trigger (raw)\n"
 	"\t-v\t\tVerbose\n"
 	"\t-z pattern\tDump motion vector images (debug)\n"
+	"\nPlease note: -v and -n are exclusive (due to messy output\n"
 	"\n", name);
 	exit(1);
 }
@@ -722,7 +725,8 @@ static void *startrecording(void *args)
 	pfn = ctx.previframe;
 	ftw = ctx.framenum - pfn;
 	pthread_mutex_unlock(&ctx.lock);
-	printf("Writing initial %d frames out...\n", ftw);
+	if (!(ctx.flags & FLAGS_MONITOR))
+		printf("Writing initial %d frames out...\n", ftw);
 
 	rp = pfn & (INMEMFRAMES - 1);
 
@@ -742,7 +746,8 @@ static void *startrecording(void *args)
 		return NULL;
 	}
 
-	printf("done.\n");
+	if (!(ctx.flags & FLAGS_MONITOR))
+		printf("done.\n");
 
 /* This is a little messy, but there's a race condition: */
 	self = pthread_self();
@@ -768,7 +773,8 @@ static void *startrecording(void *args)
 			break;
 	}
 
-	printf("\nStopping recording %s at frame %d\n", url, pfn);
+	if (!(ctx.flags & FLAGS_MONITOR))
+		printf("\nStopping recording %s at frame %d\n", url, pfn);
 	if (ctx.fd == -1) {
 		if (oc) {
 			av_write_trailer(oc);
@@ -791,7 +797,8 @@ static void *startrecording(void *args)
 		fclose(sctx.fd);
 	}
 
-	printf("\nDone.\n");
+	if (!(ctx.flags & FLAGS_MONITOR))
+		printf("\nDone.\n");
 
 	return NULL;
 }
@@ -898,7 +905,7 @@ int main(int argc, char *argv[])
 	pthread_cond_init(&ctx.cond, NULL);
 	TAILQ_INIT(&packetq);
 
-	while ((opt = getopt(argc, argv, "b:c:d:e:f:hm:o:r:s:t:vz")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:d:e:f:hm:no:r:s:t:vz:")) != -1) {
 		switch (opt) {
 		int l;
 		case 'b':
@@ -924,6 +931,9 @@ int main(int argc, char *argv[])
 		case 'm':
 			mapfile = optarg;
 			break;
+		case 'n':
+			ctx.flags |= FLAGS_MONITOR;
+			break;
 		case 'o':
 			ctx.outro = atoi(optarg);
 			break;
@@ -940,12 +950,16 @@ int main(int argc, char *argv[])
 			ctx.flags |= FLAGS_VERBOSE;
 			break;
 		case 'z':
-			ctx.flags |= FLAGS_DUMPVECTORIMAGES;
 			ctx.dumppattern = optarg;
 			break;
 		default:
 			usage(argv[0]);
 		}
+	}
+
+	if (ctx.flags & FLAGS_VERBOSE && ctx.flags & FLAGS_MONITOR) {
+		usage(argv[0]);
+		exit(1);
 	}
 
 	if (ctx.outro == -1)
@@ -1010,7 +1024,7 @@ int main(int argc, char *argv[])
 	OERR(OMX_GetParameter(cam, OMX_IndexParamPortDefinition, portdef));
 	portdef->nPortIndex = PORT_CAM + 0;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamPortDefinition, portdef));
-	timestamp->eTimestampMode =  OMX_TimestampModeResetStc;
+	timestamp->eTimestampMode =  OMX_TimestampModeRawStc;
 	OERR(OMX_SetParameter(cam, OMX_IndexParamCommonUseStcTimestamps,
 				timestamp));
 	smt->nPortIndex = OMX_ALL;
@@ -1056,7 +1070,8 @@ int main(int argc, char *argv[])
 	avc->nPFrames = IFRAMEAFTER-1;
 	avc->nBFrames = 0;
 	avc->nRefFrames = 1;
-	avc->nAllowedPictureTypes = OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
+	avc->nAllowedPictureTypes =
+		OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
 	OERRw(OMX_SetParameter(enc, OMX_IndexParamVideoAvc, avc));
 
 /* The clock doesn't bloody work for some reason.  Ignore this bit. */
@@ -1244,3 +1259,4 @@ WAIT;
 
 	return 0;
 }
+

@@ -41,6 +41,7 @@
 #include "omxmotion.h"
 #include "motion.h"
 #include <png.h>
+#include <ncurses.h>
 
 static void *motionstart(void *);
 
@@ -63,6 +64,7 @@ static struct {
 	int			threshold;
 	pthread_t		detectionthread;
 #define FLAGS_MOVEMENT		(1<<0)
+#define FLAGS_MOTMONITOR	(1<<1)
 	int			flags;
 	void 			(*eventcb)(void *, enum movementevents);
 	void			*eventcbp;
@@ -100,13 +102,16 @@ static int readmap(char *mf)
 	png_read_png(png, info, PNG_TRANSFORM_STRIP_16 |
 		PNG_TRANSFORM_STRIP_ALPHA | PNG_TRANSFORM_PACKING, NULL);
 	rows = png_get_rows(png, info);
+printf("Mapfile: \n");
 	for (i = 0; i < mctx.height; i++) {
 		uint8_t *r = rows[i];
-		for (j = 0; j < mctx.width; j++) {
-			mctx.map[i*(mctx.width + 1) + j] =
+		for (j = 0; j < mctx.width-1; j++) {
+			mctx.map[i*(mctx.width) + j] =
 				(uint16_t) (r[j] * r[j]);
+printf("%d ", mctx.map[i*(mctx.width) + j]);
 		}
-		mctx.map[i*(mctx.width + 1) + mctx.width] = 65535;
+		mctx.map[(i+1)*(mctx.width)] = 65535;
+printf("\n");
 	}
 	png_destroy_read_struct(&png, &info, &end);
 	fclose(fd);
@@ -130,7 +135,9 @@ int initmotion(struct context *ctx, char *map, int sens, int thresh,
 	mctx.map = (uint16_t *) malloc((sizeof(uint16_t)) * (cols+1)*rows);
 	mctx.threshold = thresh; //(rows * cols * thresh) / 100;
 	mctx.pngfn = ctx->dumppattern;
+	mctx.flags = (ctx->flags & FLAGS_MONITOR) ? FLAGS_MOTMONITOR : 0;
 
+	printf("PNG filename: %s\n", mctx.pngfn);
 	if (map) {
 		printf("Reading mapfile %s\n", map);
 		if (readmap(map) != 0) {
@@ -158,6 +165,15 @@ int initmotion(struct context *ctx, char *map, int sens, int thresh,
 	pthread_attr_init(&detach);
 	pthread_attr_setdetachstate(&detach, PTHREAD_CREATE_DETACHED);	
 	pthread_create(&mctx.detectionthread, &detach, motionstart, NULL);
+
+	if (mctx.flags & FLAGS_MOTMONITOR) {
+		initscr();
+		if (COLS < 121 || LINES < 69) {
+			endwin();
+			fprintf(stderr, "Please resize your terminal to 121x69 or greater.\n");
+			exit(1);
+		}
+	}
 
 	return 0;
 }
@@ -195,7 +211,6 @@ void dumppng(struct motvec *v)
 	png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	info = png_create_info_struct(png);
 	sprintf(fn, mctx.pngfn, fnum);
-printf("Writing vector frame %s\n", fn);
 	fd = fopen(fn, "wb");
 	png_init_io(png, fd);
 	png_set_compression_level(png, 0);
@@ -221,20 +236,30 @@ static void lookformotion(struct motvec *v)
 	int i;
 	int n;
 	int t;
+	int d;
+	int d2;
+	char m[122*68+1];
 
-	n = mctx.width * mctx.height;
+	n = (mctx.width) * mctx.height;
 
-	for (i = t = 0; i < n /* && t < mctx.threshold */; i++) {
+	for (i = t = d = d2 = 0; i < n /* && t < mctx.threshold */; i++, d++, d2++) {
 		if (mctx.map[i] <
 			((v[i].dx * v[i].dx) + (v[i].dy * v[i].dy))) {
+			m[d2] = '*';
 			t++;
-		}
+		} else m[d2] = ' ';
+		if (d == mctx.width + 0) { m[d2] = '\n'; d = 0; }
+	}
+	m[d2] = '\0';
+	if (mctx.flags & FLAGS_MOTMONITOR) {
+		mvprintw(0, 0, "%s\n%5d / %d (%d).", m, t, mctx.threshold, n);
+		refresh();
 	}
 
 	if (mctx.pngfn)
 		dumppng(v);
 
-printf("\r%5d / %d.", t, mctx.threshold);
+// printf("\r%5d / %d (%d).", t, mctx.threshold, n);
 fflush(stdout);
 	if (t >= mctx.threshold) {
 		if (mctx.flags & FLAGS_MOVEMENT) {
