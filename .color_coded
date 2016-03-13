@@ -2,6 +2,7 @@
 -I../rpi/firmware/opt/vc/include
 -I../rpi/firmware/opt/vc/include/interface/vcos/pthreads
 -I../rpi/firmware/opt/vc/include/interface/vmcs_host/linux
+-I../rpi/firmware/opt/vc/src/hello_pi/libs/ilclient/
 -std=c11
 -x
 c
