@@ -252,7 +252,8 @@ static void lookformotion(struct motvec *v)
 	}
 	m[d2] = '\0';
 	if (mctx.flags & FLAGS_MOTMONITOR) {
-		mvprintw(0, 0, "%s\n%5d / %d (%d).", m, t, mctx.threshold, n);
+		mvprintw(0, 0, "%s\n%5d / %d (%d) (%c).", m, t, mctx.threshold,
+			n, (int) (mctx.flags & FLAGS_MOVEMENT ? '*' : ' '));
 		refresh();
 	}
 
