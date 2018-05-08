@@ -340,6 +340,10 @@ static AVFormatContext *openoutput(char *url, int *index)
 	cc->level = 41;
 	cc->time_base.den = ctx.framerate;
 	cc->time_base.num = 1;
+/* At some point they changed the API: */
+#ifndef PIX_FMT_YUV420P
+#define PIX_FMT_YUV420P AV_PIX_FMT_YUV420P
+#endif
 	cc->pix_fmt = PIX_FMT_YUV420P;
 	st->time_base = omxtimebase;
 	*index = st->index;
